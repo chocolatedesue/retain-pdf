@@ -1,3 +1,5 @@
+
+
 # RetainPDF：PDF 保留排版翻译工具
 
 <p align="center">
@@ -80,7 +82,7 @@ RetainPDF 从一开始就是要解决各类 PDF 的保留排版翻译问题，�
 由于当前没有 Apple 开发者账号，macOS 版本第一次打开时可能会提示应用“已损坏”。这不是文件真的损坏，而是系统的签名校验导致的。把应用拖到 `/Applications` 后，执行：
 
 ```bash
-sudo xattr -r -d com.apple.quarantine /Applications/RetainPDF.app
+sudo xattr -r xattr -r -d com.apple.quarantine /Applications/RetainPDF.app
 ```
 
 然后再重新打开应用即可。
@@ -186,7 +188,7 @@ docker compose ps
 - `frontend/`
   浏览器前端、桌面壳、预览实验页面。
 - `backend/`
-  Rust API、Python 脚本、嵌入式 Python、历史工作区。
+  Rust API、Python 脚本（`pyproject.toml` 要求 Python `>=3.11,<3.12`）、嵌入式 Python、历史工作区。
 - `docker/`
   Dockerfile、发布脚本、交付用 compose 配置。
 - `data/`
