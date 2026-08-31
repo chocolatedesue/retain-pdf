@@ -22,6 +22,8 @@ from services.translation.llm.validation.errors import MathDelimiterError
 from services.translation.llm.validation.errors import PlaceholderInventoryError
 from services.translation.llm.validation.errors import SuspiciousKeepOriginError
 from services.translation.llm.validation.errors import TranslationProtocolError
+from services.translation.llm.validation.errors import ModelRefusalError
+from services.translation.llm.validation.refusal import looks_like_model_refusal
 from services.translation.llm.validation.errors import UnexpectedPlaceholderError
 from services.translation.llm.validation.math_safety import has_balanced_inline_math_delimiters
 from services.translation.llm.validation.placeholder_tokens import placeholder_sequence
@@ -334,6 +336,17 @@ def validate_batch_result(
         source_text = unit_source_text(item)
         translated_result = result.get(item_id, {})
         translated_text = translated_result.get("translated_text", "")
+        if looks_like_model_refusal(translated_text):
+            if diagnostics is not None:
+                diagnostics.emit(
+                    kind="model_refusal",
+                    item_id=item_id,
+                    page_idx=item.get("page_idx"),
+                    severity="warning",
+                    message="Model refusal detected in translated output",
+                    retryable=True,
+                )
+            raise ModelRefusalError(item_id, source_text=source_text, translated_text=translated_text)
         decision = normalize_decision(translated_result.get("decision", "translate"))
         if should_reject_keep_origin(item, decision, translated_result):
             if diagnostics is not None:

@@ -101,3 +101,16 @@ __all__ = [
     "TranslationProtocolError",
     "UnexpectedPlaceholderError",
 ]
+
+
+class ModelRefusalError(TranslationProtocolError):
+    """上游返回的是模型拒答/免责声明而非译文；走 TranslationProtocolError 的重试链路。"""
+
+    def __init__(
+        self,
+        item_id: str,
+        *,
+        source_text: str = "",
+        translated_text: str = "",
+    ) -> None:
+        super().__init__(item_id, source_text=source_text, translated_text=translated_text)
