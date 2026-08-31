@@ -40,3 +40,6 @@ data/
 *.AppImage
 backend/python/
 backend/typst-win32/bin/
+
+# 本地源码部署（含密钥/运行时产物，勿提交）
+run.env
