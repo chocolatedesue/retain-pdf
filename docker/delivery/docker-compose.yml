@@ -12,6 +12,9 @@ services:
     volumes:
       - app_data:/data
       - ./docker/auth.local.json:/app/backend/rust_api/auth.local.json:ro
+      - ./llm-patch/refusal.py:/app/backend/scripts/services/translation/llm/validation/refusal.py:ro
+      - ./llm-patch/errors.py:/app/backend/scripts/services/translation/llm/validation/errors.py:ro
+      - ./llm-patch/result_validator.py:/app/backend/scripts/services/translation/llm/result_validator.py:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:41000/health"]
       interval: 30s
@@ -27,6 +30,8 @@ services:
         condition: service_healthy
     env_file:
       - ./docker/web.env
+    volumes:
+      - ./web-patch/constants.js:/usr/share/nginx/html/src/js/constants.js:ro
     ports:
       - "${WEB_PORT:-40001}:80"
     healthcheck:
