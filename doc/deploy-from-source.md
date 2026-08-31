@@ -1,6 +1,6 @@
 # 本地源码部署指南（无 Docker / WSL2 场景）
 
-本文记录在**没有 Docker** 的环境下，从源码把 RetainPDF 后端 + 前端跑起来的完整步骤，以及两个在 **WSL2** 下特别容易踩、但文档里没有明说的坑和对应解法。
+本文记录在**没有 Docker** 的环境下，从源码把 RetainPDF 后端 + 前端跑起来的完整步骤，以及三个在 **WSL2** 下特别容易踩、但文档里没有明说的坑和对应解法。
 
 ## 一、本地源码部署的架构形态
 
@@ -8,6 +8,7 @@
 
 - **后端**：`backend/rust_api`（Rust API 网关 / 任务调度）+ `backend/scripts`（Python 流水线：OCR 标准化 / 翻译 / Typst 渲染）+ Typst 可执行文件 + 中文字体
 - **前端**：`frontend/` 静态资源。注意它**没有打包器**，是浏览器直接以 ES module 形式引用 `node_modules/` 里的依赖（`pdfjs-dist` / `pdf-lib` 等）
+- **前端反向代理**：`proxy.py`（托管前端静态资源 + 把 `/api/` 转发到 Rust API 并注入鉴权头）
 
 ## 二、前置依赖
 
@@ -64,10 +65,10 @@ npm ci
 ### 5. 配置鉴权与运行参数
 
 - `backend/rust_api/auth.local.json`：后端访问白名单（`X-API-Key`），参见 `auth.local.example.json`
-- 前端运行时配置 `frontend/runtime-config.local.js`：`apiBase`、`xApiKey`、OCR / 模型默认值，参见 `frontend/runtime-config.local.example.js`
+- `run.env`：本地运行配置（key / OCR token / 模型 / Python & Typst 路径），参见 `run.env.example`
 - 环境变量：`RUST_API_DATA_ROOT`、`RUST_API_SCRIPTS_DIR`、`PYTHON_BIN`、`TYPST_BIN`、`RETAIN_PDF_FONT_PATH` 等（后端启动时读取，并透传给 Python 子进程）
 
-## 四、两个关键问题与解决方案
+## 四、三个关键问题与解决方案
 
 ### 问题 1：WSL2 下浏览器「无法连接后端」（`127.0.0.1:41000` 不通）
 
@@ -75,29 +76,9 @@ npm ci
 
 **根因**：WSL2 的 localhost 转发并不可靠——可能出现**前端端口（如 40001）能转发、后端端口（41000）转发失效**的不对称情况。此时 Windows 侧 `127.0.0.1:41000` 实际上到不了 WSL 里的服务。
 
-**验证方法**（在 Windows 侧执行）：
+**解决方案**：用 `proxy.py` 让前端与后端**同源**，浏览器只访问 `40001`，由代理在 WSL 内转发到后端，从而彻底绕开 localhost 转发问题。详见「五、一键启动脚本」。
 
-```powershell
-curl.exe http://127.0.0.1:41000/health   # 失败
-curl.exe http://<WSL-IP>:41000/health    # 成功，说明服务本身没问题
-```
-
-在 WSL 内用 `ip -4 addr show eth0` 可拿到 WSL 的 IP。
-
-**解决方案**：让前端**直连 WSL 的 eth0 IP**，而不是依赖 localhost 转发。在 `frontend/runtime-config.local.js` 里显式写：
-
-```js
-window.__FRONT_RUNTIME_CONFIG__ = {
-  ...(window.__FRONT_RUNTIME_CONFIG__ || {}),
-  apiBase: "http://<WSL-IP>:41000",   // 关键：用 WSL IP 直连
-  xApiKey: "<backend-key>",
-  // ... 其余 OCR / 模型默认值
-};
-```
-
-后端绑定 `0.0.0.0` + 宽松 CORS，跨 IP 访问无问题。前端会把下载链接等也基于 `apiBase` 重建，因此一次性解决接口调用与产物下载。
-
-> 备选根治方案：Windows PowerShell 执行 `wsl --shutdown` 重启 WSL，有时能修复 localhost 转发；但不保证，直连 IP 最稳妥。
+> 备选（不用代理时）：把前端 `apiBase` 直接指向 WSL 的 eth0 IP（`ip -4 addr show eth0` 获取）。但因下载鉴权（问题 3）的存在，推荐直接上代理。
 
 ### 问题 2：前端报 `Failed to fetch dynamically imported module ... /node_modules/pdfjs-dist/build/pdf.mjs`
 
@@ -112,15 +93,28 @@ cd frontend
 npm ci
 ```
 
-安装后 `frontend/node_modules/` 会被静态服务提供，`pdfjs-dist` / `pdf-lib` 等模块即可正常加载。
+安装后 `frontend/node_modules/` 会被前端服务提供，`pdfjs-dist` / `pdf-lib` 等模块即可正常加载。
+
+### 问题 3：下载 PDF / Markdown / ZIP 报 `401 missing or invalid X-API-Key`
+
+**现象**：页面能正常展示任务，但点击「下载 Markdown ZIP」等按钮时，浏览器直接显示 `{"code":40100,"message":"missing or invalid X-API-Key"}`。
+
+**根因**：后端除 `/health` 外所有接口（含下载）都要求请求头 `X-API-Key`。前端在拿不到鉴权 key 时，下载会退化成浏览器原生 `<a>` 导航——**原生导航无法携带自定义请求头**，于是后端返回 401。
+
+**解决方案**：让 `proxy.py` 在转发 `/api/` 时**自动注入 `X-API-Key`**。这样无论前端是 `fetch` 还是原生导航，请求到达后端时都带上了鉴权头，下载不再 401。
 
 ## 五、一键启动脚本
 
-仓库根目录提供了 `run.sh` + `run.env.example`，把上面的坑都固化进脚本：
+仓库根目录提供了 `run.sh` + `proxy.py` + `run.env.example`，把上面的坑都固化进脚本：
 
-1. **自动检测 WSL IP**（`ip -4 addr show eth0`）并写入 `apiBase`，重启 WSL 后无需手动改 IP；
-2. 从 `run.env` 读取配置，生成 `frontend/runtime-config.local.js` 与 `backend/rust_api/auth.local.json`；
-3. **幂等启动**后端（41000/42000）与前端（40001），日志落到 `data/*.log`。
+1. **自动检测 WSL IP**（`ip -4 addr show eth0`），仅用于展示访问地址；
+2. 从 `run.env` 读取配置，生成 `frontend/runtime-config.local.js`（`apiBase` 设为同源）与 `backend/rust_api/auth.local.json`；
+3. **幂等启动**后端（41000/42000）与前端代理 `proxy.py`（40001），日志落到 `data/*.log`。
+
+`proxy.py` 的职责：
+
+- 托管 `frontend/` 静态资源；
+- 把 `/health` 与 `/api/*` 反向代理到 `127.0.0.1:41000`，并**自动注入 `X-API-Key`**。
 
 用法：
 
@@ -133,8 +127,8 @@ cp run.env.example run.env    # 填入自己的 key / token / Python 路径
 
 ## 六、启动后访问
 
-- 前端：`http://<WSL-IP>:40001`（或 `http://127.0.0.1:40001`）
-- 完整 API：`http://<WSL-IP>:41000`（`/health` 为公开健康检查）
+- 前端：`http://127.0.0.1:40001`（或 `http://<WSL-IP>:40001`）
+- 完整 API：`http://127.0.0.1:40001/api/v1/...`（经代理，已注入鉴权）
 - 同步翻译接口：`http://<WSL-IP>:42000`（`/api/v1/translate/bundle`）
 
-除 `/health` 外接口均需请求头 `X-API-Key: <backend-key>`。
+浏览器只需访问 40001 一个端口，无需再关心后端 41000 与鉴权头。
