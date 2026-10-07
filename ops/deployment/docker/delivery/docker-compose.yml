@@ -6,6 +6,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./docker/app.env
+    environment:
+      # LAB-605: 请求未带 workers 时的默认翻译并发（上游默认 4；generic=自建网关/自定义 API）
+      - RUST_API_DEFAULT_GENERIC_WORKERS=8
     ports:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-41000}:41000"
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${APP_SIMPLE_PORT:-42000}:42000"
