@@ -12,10 +12,10 @@ services:
     volumes:
       - app_data:/data
       - ./docker/auth.local.json:/app/services/api/auth.local.json:ro
+      # 2026-10-07 LAB-605: LAB-200 的合批门禁放宽（min 16->4, max 1200->4000 chars）。
+      # v4.2.6 的 BatchPolicy 默认值与 v4.2.5 相同，补丁基于 v4.2.6 源文件重打。
+      - ./gw2a-patch/control_context.py:/usr/local/lib/python3.11/site-packages/retainpdf_pipeline/translate/llm/shared/control_context.py:ro
     healthcheck:
-      # Readiness includes the database and every supervised runtime.  The
-      # liveness endpoint intentionally remains 200 while degraded, so using
-      # /health here would release dependent services before app is usable.
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:41000/ready"]
       interval: 30s
       timeout: 10s
